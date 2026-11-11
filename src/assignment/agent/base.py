@@ -152,6 +152,7 @@ class Agent:
 
         # TODO(1.1.a): Add machinery to maintain agent state as it takes actions
         # and observes the results.
+        self.message_history:list[dict[str, Any]] = []
 
     def load_skills(self, skills_path: Path) -> dict[str, dict[str, str]]:
         """Load the skill folders exposed to this agent."""
@@ -218,7 +219,7 @@ class Agent:
         return response.choices[0].message.model_dump(exclude_none=True)
 
     def build_prompt(self) -> list[dict[str, Any]]:
-        # TODO(1.1.a): Construct a sequence of messages that form the language
+        # DONE(1.1.a): Construct a sequence of messages that form the language
         # model prompt. This should include standing instructions, task
         # specification, prior interaction including observations, reasoning,
         # and actions from previous turns. Note that this method should be
@@ -227,7 +228,13 @@ class Agent:
 
         # You want to be careful about which attributes of the class you modify
         # here as they may also be handled by the subclasses.
-        raise NotImplementedError
+        prompts = [
+            {"role":"system", "content": self.system_prompt},
+            {"role":"user", "content": self.task_prompt},
+        ]
+        prompts.extend(deepcopy(self.message_history))
+
+        return prompts
 
     def estimate_active_prompt_tokens(self) -> int:
         """Estimate the next prompt, calibrated by the provider's latest usage."""
@@ -331,12 +338,35 @@ class Agent:
             # by setting `Agent.finished`. If the agent exceeds the
             # `step_limit`, raise `StepLimitError`.
 
+            while not self.finished:
+                if self.steps_taken >= self.step_limit:
+                    raise StepLimitError(
+                        f"Agent did not finish within {self.step_limit}"
+                        )
+                message = self.query_language_model()
+                self.message_history.append(message)
+
+                tools = message.get("tool_calls", [])
+
+                if tools:
+                    observation = self.execute_tool_calls(tools)
+                    self.message_history.extend(observation)
+                else:
+                    self.message_history.append(
+                        {"role":"user",
+                         "content":(
+                            "Continue the task using the available tools."
+                            "Follow the task's completion protocol when finish."
+                            )
+                        }
+                    )
+
+
             # TODO(2.2) Call `maybe_compact_context()` before each new action
             # request in your shared loop. It already estimates active tokens
             # and handles the threshold, and tracks compaction events for
             # logging.
 
-            raise NotImplementedError
         finally:
             # This block is provided infrastructure. Do not modify it: a
             # trajectory is required even when a run fails.
