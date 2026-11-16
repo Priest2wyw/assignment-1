@@ -72,8 +72,17 @@ class CodeAgent(Agent):
             "</system_information>"
         )
         self.task_prompt = task
-        # TODO(1.4): If any skills are available to the agent, make their
+        # DONE(1.4): If any skills are available to the agent, make their
         # descriptions/metadata available to the agent in the prompt.
+        # print(self.skills)
+        if self.skills:
+            catalog = "\n\n".join(
+                [v['metadata'] for v in self.skills.values()]
+            )
+            self.system_prompt += (
+                f"This is the skills agent can use:\n"
+                f"Skills: <skills>{catalog}</skills>\n"
+            ) 
 
     def execute_tool_calls(
         self, tool_calls: list[dict[str, Any]]
@@ -120,6 +129,19 @@ class CodeAgent(Agent):
                     print(summary, flush=True)
                     self.finished = True
                     content = "Submission received. Task finished."
+                elif name == "invoke_skill":
+                    if set(arguments) != {"name"}:
+                        raise ValueError(
+                            "invoke_skill requires exactly one argument: name."
+                        )
+
+                    name = arguments["name"]
+                    if not isinstance(name, str):
+                        raise ValueError("summary must be a string.")
+                    
+                    content = self.skills.get(name, {}).get("content", None)
+                    if content is None:
+                        raise ValueError(f"skill {name} not regist")
 
                 else:
                     raise ValueError(f"Unknown tool: {name}")

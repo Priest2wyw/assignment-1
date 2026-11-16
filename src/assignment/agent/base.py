@@ -11,6 +11,8 @@ import json
 import logging
 import math
 import os
+import re
+import yaml
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +32,12 @@ MAX_OBSERVATION_CHARS = 10_000
 # TODO(Part 2): Write instructions that make the model produce concise working
 # memory for a software agent. The prompt should preserve concrete progress,
 # failures, test results, constraints, and next steps without copying raw output.
-COMPACTION_SYSTEM_PROMPT = ""
+COMPACTION_SYSTEM_PROMPT = """
+TASK:COMPACT THE CONTEXT by produce working memory for the agent.
+You need preserve the objective, constraints, files, commands, edits, concrete results, failed approaches, tests, blockers, and next action.
+
+Summarize only an old prefix; retain the original system/task messages verbatim and at least the latest complete assistant action with all linked tool observations. 
+"""
 
 
 class StepLimitError(Exception):
@@ -165,7 +172,38 @@ class Agent:
         # ``content`` of the skill file for ``invoke_skill``. Reject duplicate
         # names and malformed or missing frontmatter with a clear
         # ``ValueError``.
-        raise NotImplementedError
+
+        skills = {}
+        
+        for path in skills_path.iterdir():
+            if not path.is_dir():
+                continue
+            file = path  / 'SKILL.md'
+            if not file.exists():
+                assert ValueError(f"loss file {file}")
+
+            content = file.read_text(encoding="utf-8")
+            match = re.search(
+                r"\A---[ \t]*\r?\n(?P<frontmatter>.*?)^---[ \t]*\r?$",
+                content,
+                flags=re.DOTALL | re.MULTILINE,
+            )
+
+            if match is None:
+                raise ValueError(f"缺少或格式错误的 YAML frontmatter: {skill_file}")
+
+            frontmatter = match.group("frontmatter")
+            try:
+                meta_data = yaml.safe_load(frontmatter)
+            except Exception as E:
+                raise ValueError(f"frontmatter is error {meta_data}")
+
+            skills[path.name] = {
+                "metadata": f"{meta_data}",
+                "content" : content
+            }
+
+        return skills
 
     def query_language_model(self) -> dict[str, Any]:
         """Send one tool-enabled Chat Completions request and normalize it."""
@@ -263,7 +301,7 @@ class Agent:
         """Replace parts of prompt with model-generated working memory. Changes the
         content that `build_prompt` emits."""
 
-        # TODO(2.1): Prompt the model to compact the context. The system
+        # DONE(2.1): Prompt the model to compact the context. The system
         # prompt should ask for concise factual working memory and preserve
         # the objective, constraints, files, commands, edits, concrete
         # results, failed approaches, tests, blockers, and next action.
@@ -272,10 +310,18 @@ class Agent:
         # with all linked tool observations. The resulting summary should change
         # what `build_prompt` emits, and reduce the length of the prompt.
 
-        raise NotImplementedError
 
         compaction_prompt = []
-
+        compaction_prompt = [
+            {"role":"system", "content": COMPACTION_SYSTEM_PROMPT},
+            {"role":"user", "content": (
+                f"origin system prompt {self.system_prompt}\n"
+                f"task prompt is {self.task_prompt}\n"
+                f"messages in the process is {json.dumps(self.message_history, ensure_ascii=False)}")
+             },
+        ]
+        compaction_prompt.extend(self.message_history)
+        
         ### Do not modify this section ###
         compaction_response = self.client.chat.completions.create(
             model=self.model,
@@ -287,7 +333,17 @@ class Agent:
 
         # Use `compaction_response` to update what `build_prompt` emits, but
         # DO NOT modify the object itself. Let the method return it unchanged.
+        summary = compaction_response.choices[0].message.content
 
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError("Compaction returned an empty summary.")
+
+        self.message_history = [
+            {
+                "role": "user",
+                "content": f"Working memory from earlier steps:\n{summary}",
+            },
+        ]
         ### Do not modify this section ###
         return compaction_prompt, compaction_response.model_dump(mode="json")
         ##################################
@@ -343,6 +399,17 @@ class Agent:
                     raise StepLimitError(
                         f"Agent did not finish within {self.step_limit}"
                         )
+                # Done(2.2) Call `maybe_compact_context()` before each new action
+                # request in your shared loop. It already estimates active tokens
+                # and handles the threshold, and tracks compaction events for
+                # logging.
+                has_compacted  = self.maybe_compact_context()
+                if has_compacted:
+                    print(
+                        f"[agent] step {self.steps_taken}: compacting the context",
+                        flush=True,
+                    )
+
                 message = self.query_language_model()
                 self.message_history.append(message)
 
@@ -362,10 +429,7 @@ class Agent:
                     )
 
 
-            # TODO(2.2) Call `maybe_compact_context()` before each new action
-            # request in your shared loop. It already estimates active tokens
-            # and handles the threshold, and tracks compaction events for
-            # logging.
+                
 
         finally:
             # This block is provided infrastructure. Do not modify it: a
