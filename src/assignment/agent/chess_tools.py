@@ -52,8 +52,20 @@ def _simulate_move(client: httpx.Client, arguments: str) -> str:
     # JSON arguments, arguments that are not an object, a missing or
     # non-string fen, a non-string move, a position or move the server rejects,
     # and a transport failure.
-    raise NotImplementedError
+    try:
+        args = json.loads(arguments)
+        move = args.get("move", None)
+        fen = args.get('fen')
+        content = {"fen":fen}
+        if move:
+            content['move']=move
 
+        response =  client.post("/api/simulate", json=content)
+        response.raise_for_status()
+
+        return json.dumps(response.json())
+    except Exception as exec:
+        return f"<chess_error>{exec}</chess_error>"
 
 def _play_move(client: httpx.Client, arguments: str) -> str:
     """Existing tool: play one move as White and return the resulting state.
@@ -61,14 +73,21 @@ def _play_move(client: httpx.Client, arguments: str) -> str:
     Takes the raw JSON arguments of one tool call. Returns the new state, or a
     `<chess_error>` observation if the move could not be played.
     """
-    # TODO(3.1.b): Parse the arguments and POST {"move": <uci move>} to
+    # DONE(3.1.b): Parse the arguments and POST {"move": <uci move>} to
     # /api/move. Return its JSON object. Catch any errors raised by the
     # tool and return an error message between `<chess_error></chess_error>`
     # for the agent to address. Cover malformed JSON arguments, arguments
     # that are not an object, a missing or non-string fen, a non-string move,
     # a position or move the server rejects, and a transport failure.
-    raise NotImplementedError
+    try:
+        args = json.loads(arguments)
+        move = args.get("move")
+        response =  client.post("/api/move", json={"move":move})
+        response.raise_for_status()
 
+        return json.dumps(response.json())
+    except Exception as exec:
+        return f"<chess_error>{exec}</chess_error>"
 
 def _run_python(env: Any, port: int, arguments: str) -> str:
     """New tool: run Python with access to the existing registered tools.
@@ -95,15 +114,61 @@ def _run_python(env: Any, port: int, arguments: str) -> str:
     #
     # Return <chess_error>{message}</chess_error> if there are issues like type
     # mismatches or parsing failures.
-    raise NotImplementedError
+    try:
+        args = json.loads(arguments)
+        if not isinstance(args, dict):
+            raise ValueError("Arguments must be a JSON object.")
 
+        if set(args) != {"code"}:
+            raise ValueError("Expected exactly one argument: code.")
+
+        code = args["code"]
+        if not isinstance(code, str):
+            raise ValueError("code must be a string.")
+
+        encoded = base64.b64encode(code.encode("utf-8")).decode("ascii")
+
+        result = env.execute(
+            [
+                "python",
+                "/opt/assignment/sandbox_python.py",
+                str(port),
+                encoded,
+            ],
+            shell=False,
+        )
+
+        if result["returncode"] != 0:
+            message = (
+                result.get("exception_info")
+                or result.get("stderr")
+                or f"Sandbox process exited with code {result['returncode']}."
+            )
+            return f"<chess_error>{message}</chess_error>"
+
+        return result["stdout"]
+
+    except Exception as exc:
+        return f"<chess_error>{exc}</chess_error>"
 
 def _invoke_skill(skills: dict[str, dict[str, str]], arguments: str) -> str:
     """Existing tool: load one skill's instructions into the conversation."""
-    # TODO(3.5): parse the arguments and return the named skill's content.
-    # Return <chess_error>{message}</chess_error> if there are issues like type
-    # mismatches or parsing failures.
-    raise NotImplementedError
+    try:
+        args = json.loads(arguments)
+        if not isinstance(args, dict):
+            raise ValueError("Arguments must be a JSON object.")
+        if set(args) != {"name"}:
+            raise ValueError("invoke_skill requires exactly one argument: name.")
+
+        name = args["name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("name must be a nonempty string.")
+        if name not in skills:
+            raise ValueError(f"Unknown skill: {name}")
+
+        return skills[name]["content"]
+    except Exception as exc:
+        return f"<chess_error>{exc}</chess_error>"
 
 
 def _game_state(client: httpx.Client, reset: bool = False) -> dict:

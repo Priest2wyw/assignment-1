@@ -107,6 +107,7 @@ class ChessAgent(Agent):
         )
 
         # TODO(Part 3): Register the play_move tool schema from tools.py.
+        self.tools.extend([PLAY_MOVE_TOOL, SIMULATE_MOVE_TOOL])
 
         if programmatic_tools:
             self.tools.append(RUN_PYTHON_TOOL)
@@ -174,7 +175,61 @@ class ChessAgent(Agent):
         # 4. Link every observation to its call with tool_call_id.
         # 5. Turn malformed, unknown, rejected, or extra parallel calls into
         #    recoverable <chess_error> observations instead of crashing.
+        observations = []
+        for call in tool_calls:
+            function = call.get("function", {})
+            name = function.get("name")
+            argues = function.get('arguments')
 
+            if name == 'play_move':
+                results = _play_move(self.chess_client, arguments=argues)
+                if not  results.startswith("<chess_error>"):
+                    status = json.loads(results)
+                    self.last_state = status
+                    self.finished = status.get('game_over')
+                    content =  self.format_state(status)
+                else:
+                    content = results
+            elif name=='simulate_move':
+                content = _simulate_move(
+                    self.chess_client,
+                    arguments=argues,
+                )
+            elif name == "invoke_skill" and any(
+                tool.get("function", {}).get("name") == "invoke_skill"
+                for tool in self.tools
+            ):
+                content = _invoke_skill(self.skills, arguments=argues)
+            elif name == "run_python" and any(
+                tool.get("function", {}).get("name") == "run_python"
+                for tool in self.tools
+            ):
+                content = _run_python(
+                    self.env,
+                    self.python_sandbox_port,
+                    arguments=argues,
+                )
+
+                # Python 代码可能调用过 play_move，需要重新读取真实棋局。
+                try:
+                    state = _game_state(self.chess_client)
+                    self.last_state = state
+                    self.finished = bool(state.get("game_over", False))
+                except Exception as exc:
+                    content = (
+                        "<chess_error>"
+                        f"Could not refresh the live game state: {exc}"
+                        "</chess_error>"
+                    )
+
+            else:
+                content = f"<chess_error>Unkonw tool:{name}</chess_error>"
+
+            observations.append({
+                "role": "tool",
+                "tool_call_id": call["id"],
+                "content": content,
+            })
         # TODO(Part 3.3-4): add cases for simulate_move and run_python, with
         # linked observations and recoverable errors, just like the old tool.
-        raise NotImplementedError
+        return observations

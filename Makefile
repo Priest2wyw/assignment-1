@@ -18,8 +18,15 @@ SWEBENCH_TRAJECTORY ?= artifacts/$(INSTANCE)-trajectory.json
 TRAJECTORY ?= artifacts/part3-trajectory.json
 RESULT ?= artifacts/game-result.json
 MODEL ?= deepseek-flash
-DEEPSEEK_MODEL ?= deepseek/deepseek-v4-flash-0731
-GPT_OSS_MODEL ?= openai/gpt-oss-120b
+DEEPSEEK_MODEL ?= deepseek-flash
+# Empty by default: resolve GPT_OSS_NAME from .env in the Python runner.
+# An explicit `make ... GPT_OSS_MODEL=...` still overrides it.
+GPT_OSS_MODEL ?=
+CHESS_BASE_URL ?=
+CHESS_BASE_URL_ENV ?= OPENAI_BASE_URL
+CHESS_API_KEY_ENV ?= OPENAI_API_KEY
+CHESS_MODEL_ENV ?= OPENAI_MODEL
+CHESS_PROVIDER_ARGS = --base-url-env $(CHESS_BASE_URL_ENV) --api-key-env $(CHESS_API_KEY_ENV) --model-env $(CHESS_MODEL_ENV) $(if $(CHESS_BASE_URL),--base-url "$(CHESS_BASE_URL)",)
 MODEL_TAG ?= $(subst /,-,$(MODEL))
 COMPACT_THRESHOLD ?= 6000
 STEPS ?= 200
@@ -79,17 +86,17 @@ run-swebench-agent:
 		--step-limit $(STEPS) $(if $(filter-out 0,$(COMPACT_THRESHOLD)),--compact-threshold-tokens $(COMPACT_THRESHOLD),)
 
 run-chess-agent:
-	uv run assignment-play-chess --model $(MODEL) --task $(TASK) --patch $(PATCH) \
+	uv run assignment-play-chess $(if $(MODEL),--model "$(MODEL)",) $(CHESS_PROVIDER_ARGS) --task $(TASK) --patch $(PATCH) \
 		--step-limit $(STEPS) --sandbox-timeout $(CHESS_TIMEOUT) \
 		--trajectory $(TRAJECTORY) --result $(RESULT)
 
 run-obs-experiment-no-legal-moves:
-	uv run assignment-play-chess --model $(MODEL) --task $(TASK) --patch $(PATCH) \
+	uv run assignment-play-chess $(if $(MODEL),--model "$(MODEL)",) $(CHESS_PROVIDER_ARGS) --task $(TASK) --patch $(PATCH) \
 		--omit-legal-moves --step-limit $(STEPS) --sandbox-timeout $(CHESS_TIMEOUT) \
 		--trajectory $(OBS_NO_LEGAL_TRAJECTORY) --result $(OBS_NO_LEGAL_RESULT)
 
 run-obs-experiment-legal-moves:
-	uv run assignment-play-chess --model $(MODEL) --task $(TASK) --patch $(PATCH) \
+	uv run assignment-play-chess $(if $(MODEL),--model "$(MODEL)",) $(CHESS_PROVIDER_ARGS) --task $(TASK) --patch $(PATCH) \
 		--step-limit $(STEPS) --sandbox-timeout $(CHESS_TIMEOUT) \
 		--trajectory $(OBS_LEGAL_TRAJECTORY) --result $(OBS_LEGAL_RESULT)
 
@@ -100,10 +107,10 @@ run-obs-deepseek-legal:
 	$(MAKE) run-obs-experiment-legal-moves MODEL="$(DEEPSEEK_MODEL)" MODEL_TAG=deepseek
 
 run-obs-gpt-oss-no-legal:
-	$(MAKE) run-obs-experiment-no-legal-moves MODEL="$(GPT_OSS_MODEL)" MODEL_TAG=gpt-oss
+	$(MAKE) run-obs-experiment-no-legal-moves MODEL="$(GPT_OSS_MODEL)" MODEL_TAG=gpt-oss CHESS_MODEL_ENV=GPT_OSS_NAME CHESS_BASE_URL_ENV=GPT_OSS_URL CHESS_API_KEY_ENV=GPT_OSS_KEY
 
 run-obs-gpt-oss-legal:
-	$(MAKE) run-obs-experiment-legal-moves MODEL="$(GPT_OSS_MODEL)" MODEL_TAG=gpt-oss
+	$(MAKE) run-obs-experiment-legal-moves MODEL="$(GPT_OSS_MODEL)" MODEL_TAG=gpt-oss CHESS_MODEL_ENV=GPT_OSS_NAME CHESS_BASE_URL_ENV=GPT_OSS_URL CHESS_API_KEY_ENV=GPT_OSS_KEY
 
 run-chess-modal:
 	uv run assignment-chess-modal --task $(TASK) --sandbox-timeout $(CHESS_TIMEOUT) $(if $(wildcard $(PATCH)),--patch $(PATCH),)

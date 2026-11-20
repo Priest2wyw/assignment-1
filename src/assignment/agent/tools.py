@@ -120,7 +120,7 @@ INVOKE_SKILL_TOOL = {
                 "name": {
                     "type": "string",
                     "description": (
-                        "The skill's directory name, for example `hello-skill`."
+                        "The skill's frontmatter name, for example `hello-skill`."
                     ),
                 },
             },
@@ -130,13 +130,92 @@ INVOKE_SKILL_TOOL = {
     },
 }
 
-# TODO(3.1.a): Define an OpenAI function-tool schema named ``play_move``.
+# DONE(3.1.a): Define an OpenAI function-tool schema named ``play_move``.
 # It must accept exactly one required string argument named ``move``, explain
 # that moves use UCI notation (for example e2e4), and reject extra arguments.
-PLAY_MOVE_TOOL: dict = {}
+PLAY_MOVE_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "play_move",
+        "description": (
+            "Play one move on the current chess board. "
+            "Use UCI notation: source square followed by destination square, "
+            "for example e2e4. For pawn promotion, append q, r, b, or n, "
+            "for example e7e8q."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "move": {
+                    "type": "string",
+                    "description": ("The move using UCI notation."),
+                },
+            },
+            "required": ["move"],
+            "additionalProperties": False,
+        },
+    },
+}
 
 # TODO(3.3): Define the `simulate_move` tool, like the `play_move` tool.
-SIMULATE_MOVE_TOOL: dict = {}
-
+SIMULATE_MOVE_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "simulate_move",
+        "description": (
+            "Inspect a chess position given by a complete six-field FEN. "
+            "If move is provided, simulate exactly one ply for the side "
+            "to move using UCI notation, such as e2e4 or e7e8q. "
+            "Return the resulting position, legal moves, and game result "
+            "as JSON without changing the live game."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "fen": {
+                    "type": "string",
+                    "description": "The complete six-field FEN position.",
+                },
+                "move": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "A UCI move to simulate. "
+                        "Use null to inspect the position without moving."
+                    ),
+                },
+            },
+            "required": ["fen", "move"],
+            "additionalProperties": False,
+        },
+    },
+}
 # TODO()
-RUN_PYTHON_TOOL: dict = {}
+
+RUN_PYTHON_TOOL: dict = {
+    "type": "function",
+    "function": {
+        "name": "run_python",
+        "description": (
+            "Run Python code in the sandbox. "
+            "simulate_move(fen, move=None) and play_move(move) are available "
+            "and return dictionaries. simulate_move explores hypothetical "
+            "positions; play_move changes the live game. "
+            "Print values to include them in the output. "
+            "Returns JSON containing stdout, stderr, and error."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "The Python source code to execute.",
+                },
+            },
+            "required": ["code"],
+            "additionalProperties": False,
+        },
+    },
+}

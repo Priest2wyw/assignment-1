@@ -39,3 +39,65 @@ the other three failures concern unfinished Part 3 chess tools. Skill-loader
 validation also remains incomplete. This checkpoint is not a claim that
 Task 2 is complete or that the generated patches passed fresh-testbed
 evaluation. Runtime artifacts and diagnostic logs remain outside this commit.
+
+On 2026-11-17, OpenAI Codex analyzed the repeated compaction behavior using
+saved trajectories and implemented a read-only JSON artifact viewer under
+`scripts/local/`. The viewer lists artifacts, displays all compaction events,
+and provides field selectors for full-file and individual-event inspection.
+Codex added offline file-access tests and checked the HTTP endpoints against
+the saved trajectory. At the user's request it checked ports 8101–8120 and
+started the viewer on 0.0.0.0:8105, the lowest available port.
+
+Later on 2026-11-17, at the user's explicit request, Codex implemented an
+experimental compaction-input filter that excludes role=tool observations
+before summarization while preserving original API audit records. It added
+an offline test demonstrating that outputs are omitted and that actions and
+prior memory remain available to the summarizer. The summary instruction now
+distinguishes attempted actions from confirmed outcomes. This experiment
+differs from the assignment's original requirement to summarize observations;
+it does not address the existing loss of recent complete tool steps.
+
+Codex subsequently compared the two current Django trajectories, separately
+summed action and summary API usage, inspected per-step context sizes and
+summary quality, and wrote `artifacts/token-usage-analysis.md`. The report
+records input-file hashes, cache statistics, experimental limitations, and
+the lack of independent patch-replay verification during this analysis.
+
+On 2026-11-18, Codex diagnosed slow chess-agent requests by inspecting saved
+usage data, checking SDK request serialization with a mock transport, and
+making two small-budget live DeepSeek requests to compare output-limit fields.
+It consulted the DeepSeek API reference and recorded the parameter
+compatibility findings in `artifacts/chess-token-limit-diagnosis.md` without
+changing the assignment's provided model-request implementation.
+
+Codex then added model-provider overrides to the chess CLI and Make targets
+at the user's request. GPT-OSS targets resolve GPT_OSS_URL, GPT_OSS_KEY and
+GPT_OSS_NAME from the environment/.env; defaults retain the OPENAI_* setup.
+Credentials are selected by variable name, not command-line secret values.
+It added offline selection tests, checked Make's expanded commands, and made
+one small live OpenRouter tool-call test which successfully returned an e2e4
+play_move call (342 total tokens). The connectivity check did not run a full
+chess game or execute the four observation experiments.
+
+On 2026-11-20, Codex explained the Part 3 move, simulation, sandboxed Python,
+and chess-skill tools, provided implementation examples for Parts 3.1–3.4,
+and checked the student's implementation with offline stand-ins. At the user's
+request it implemented Part 3.5: cached full-content skill invocation,
+recoverable argument errors, and dispatch restricted to a registered tool.
+It also repaired the shared skill loader's frontmatter-name lookup, duplicate
+and malformed-file validation, and metadata-only catalog for chess skills.
+Supplemental tests were added under `scripts/local/`; provided tests, tasks,
+and the chess submodule were not changed.
+
+The new Part 3.5 checks reported 17 passed. The complete offline public and
+local check run reported 71 passed, 4 failed, and 4 deselected. The four
+remaining failures were present before this work: the public chess test
+expects only play_move even after simulate_move is registered; two CodeAgent
+cases object to unconditional submission-instruction wording; and the older
+compaction-filter experiment's fixture does not initialize the current
+compaction settings. An independent code review found no critical or important
+Part 3.5 issues. No real model request, Modal sandbox, or required live
+skill/search trajectory was run as part of this implementation verification.
+The user requested committing and pushing all current code and supporting
+documentation, including existing provider/viewer and compaction work;
+generated runtime artifacts remain outside the commit.

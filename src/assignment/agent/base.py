@@ -164,45 +164,46 @@ class Agent:
     def load_skills(self, skills_path: Path) -> dict[str, dict[str, str]]:
         """Load the skill folders exposed to this agent."""
 
-        # TODO(1.4): Validate ``skills_path``, discover one ``SKILL.md``
-        # per child directory, parse its YAML frontmatter (what's between the
-        # `---` tags at the head of the file), and return a mapping
-        # keyed by the frontmatter ``name``. Each value must contain a concise
-        # ``metadata`` string for the model's skill catalog and the complete
-        # ``content`` of the skill file for ``invoke_skill``. Reject duplicate
-        # names and malformed or missing frontmatter with a clear
-        # ``ValueError``.
+        if not skills_path.is_dir():
+            raise ValueError(f"Skills path must be a directory: {skills_path}")
 
-        skills = {}
-        
-        for path in skills_path.iterdir():
-            if not path.is_dir():
+        skills: dict[str, dict[str, str]] = {}
+        for directory in sorted(skills_path.iterdir()):
+            if not directory.is_dir():
                 continue
-            file = path  / 'SKILL.md'
-            if not file.exists():
-                assert ValueError(f"loss file {file}")
+            skill_file = directory / "SKILL.md"
+            try:
+                content = skill_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise ValueError(f"Could not read skill file {skill_file}: {exc}") from exc
 
-            content = file.read_text(encoding="utf-8")
             match = re.search(
                 r"\A---[ \t]*\r?\n(?P<frontmatter>.*?)^---[ \t]*\r?$",
                 content,
                 flags=re.DOTALL | re.MULTILINE,
             )
-
             if match is None:
-                raise ValueError(f"缺少或格式错误的 YAML frontmatter: {skill_file}")
+                raise ValueError(f"Missing or malformed YAML frontmatter: {skill_file}")
 
-            frontmatter = match.group("frontmatter")
             try:
-                meta_data = yaml.safe_load(frontmatter)
-            except Exception as E:
-                raise ValueError(f"frontmatter is error {meta_data}")
+                metadata = yaml.safe_load(match.group("frontmatter"))
+            except yaml.YAMLError as exc:
+                raise ValueError(f"Invalid YAML frontmatter in {skill_file}: {exc}") from exc
+            if not isinstance(metadata, dict):
+                raise ValueError(f"Skill frontmatter must be a mapping: {skill_file}")
 
-            skills[path.name] = {
-                "metadata": f"{meta_data}",
-                "content" : content
+            name = metadata.get("name")
+            description = metadata.get("description")
+            for field, value in (("name", name), ("description", description)):
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"Skill {field} must be a nonempty string: {skill_file}")
+            if name in skills:
+                raise ValueError(f"Duplicate skill name {name!r}: {skill_file}")
+
+            skills[name] = {
+                "metadata": f"name: {name}\ndescription: {description}",
+                "content": content,
             }
-
         return skills
 
     def query_language_model(self) -> dict[str, Any]:
@@ -311,16 +312,27 @@ class Agent:
         # what `build_prompt` emits, and reduce the length of the prompt.
 
 
-        compaction_prompt = []
+        # Exclude observations from this experiment's summary input, without
+        # mutating the original history or API audit records.
+        assist_indice = [
+            i for i, message in enumerate(self.message_history)
+            if message.get("role") == "assistant"
+        ]
+        cur_index = assist_indice[-self.compaction_keep_recent_steps]
+
+        old_messages = self.message_history[:cur_index]
+        recent_messages = self.message_history[cur_index:]
+
         compaction_prompt = [
-            {"role":"system", "content": COMPACTION_SYSTEM_PROMPT},
+            {"role":"system", "content": (
+                COMPACTION_SYSTEM_PROMPT
+            )},
             {"role":"user", "content": (
                 f"origin system prompt {self.system_prompt}\n"
                 f"task prompt is {self.task_prompt}\n"
-                f"messages in the process is {json.dumps(self.message_history, ensure_ascii=False)}")
+                f"messages in the process is {json.dumps(old_messages, ensure_ascii=False)}")
              },
         ]
-        compaction_prompt.extend(self.message_history)
         
         ### Do not modify this section ###
         compaction_response = self.client.chat.completions.create(
@@ -343,6 +355,7 @@ class Agent:
                 "role": "user",
                 "content": f"Working memory from earlier steps:\n{summary}",
             },
+            *recent_messages,
         ]
         ### Do not modify this section ###
         return compaction_prompt, compaction_response.model_dump(mode="json")

@@ -179,12 +179,41 @@ def run_swebench_agent() -> None:
     print(f"Trajectory: {trajectory}")
 
 
+def _configure_chess_model(args: argparse.Namespace) -> str:
+    """Resolve a chess runner's provider before starting a paid sandbox.
+
+    Credentials are selected by environment-variable name, never passed on
+    the command line. dotenv has already populated the environment on import.
+    The base agent consumes OPENAI_* inside this runner process only.
+    """
+    model = args.model or os.environ.get(args.model_env)
+    base_url = args.base_url or os.environ.get(args.base_url_env)
+    api_key = os.environ.get(args.api_key_env)
+    for value, variable in (
+        (model, args.model_env),
+        (base_url, args.base_url_env),
+        (api_key, args.api_key_env),
+    ):
+        if not value or not value.strip():
+            raise SystemExit(f"Set {variable} for the selected model provider.")
+    os.environ["OPENAI_BASE_URL"] = base_url.strip()
+    os.environ["OPENAI_API_KEY"] = api_key.strip()
+    return model.strip()
+
+
 def run_chess_agent() -> None:
     """Apply the Part 1 patch, then let ChessAgent play through the API."""
 
     parser = argparse.ArgumentParser(description=run_chess_agent.__doc__)
     parser.add_argument("--task", type=Path, default=DEFAULT_TASK)
     parser.add_argument("--model")
+    parser.add_argument("--model-env", default="OPENAI_MODEL",
+                        help="environment variable used when --model is omitted")
+    parser.add_argument("--base-url", help="override the model API base URL")
+    parser.add_argument("--base-url-env", default="OPENAI_BASE_URL",
+                        help="environment variable used when --base-url is omitted")
+    parser.add_argument("--api-key-env", default="OPENAI_API_KEY",
+                        help="environment variable holding the selected provider's key")
     parser.add_argument("--step-limit", type=int, default=200)
     _add_compaction_argument(parser)
     parser.add_argument("--skills-path", type=Path)
@@ -207,7 +236,7 @@ def run_chess_agent() -> None:
             f"Part 1 patch not found at {patch}. Run assignment-code-agent first."
         )
 
-    model = _model(args.model)
+    model = _configure_chess_model(args)
     with ChessSandbox(
         task=args.task,
         patch=patch,
